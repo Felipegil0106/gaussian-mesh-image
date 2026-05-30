@@ -16,7 +16,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update -yq && apt-get install -yq \
     build-essential git cmake wget ffmpeg pkg-config \
     colmap xvfb \
-    libpng-dev libjpeg-dev libtiff-dev \
+    libpng-dev libjpeg-dev libtiff-dev libjxl-dev \
     libglu1-mesa-dev libglew-dev libglfw3-dev \
     libboost-iostreams-dev libboost-program-options-dev \
     libboost-system-dev libboost-serialization-dev libboost-thread-dev \
@@ -60,6 +60,9 @@ RUN git clone https://github.com/cdcseacave/openMVS.git --branch master /tmp/ope
         -DCMAKE_BUILD_TYPE=Release \
         -DVCG_ROOT=/opt/vcglib \
         -DOpenMVS_USE_CUDA=ON \
+        -DOpenMVS_BUILD_VIEWER=OFF \
+        -DOpenMVS_USE_BREAKPAD=OFF \
+        -DOpenMVS_ENABLE_TESTS=OFF \
         -DCMAKE_LIBRARY_PATH=/usr/local/cuda/lib64/stubs/ \
         -DCUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda/ \
         -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89" \

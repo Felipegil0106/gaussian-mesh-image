@@ -14,7 +14,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # ── Paso 1: sistema base + COLMAP + dependencias de OpenMVS ──
 # (COLMAP de apt = el que ya usamos y sirve para la parte sparse)
 RUN apt-get update -yq && apt-get install -yq \
-    build-essential git cmake wget ffmpeg \
+    build-essential git cmake wget ffmpeg pkg-config \
     colmap xvfb \
     libpng-dev libjpeg-dev libtiff-dev \
     libglu1-mesa-dev libglew-dev libglfw3-dev \
@@ -41,6 +41,17 @@ RUN git clone https://github.com/cgal/cgal --branch=v6.0.1 /tmp/cgal && \
 
 # ── Paso 4: VCGLib (no se compila, solo se clona y se referencia) ──
 RUN git clone https://github.com/cdcseacave/VCG.git /opt/vcglib
+
+# ── Paso 4b: nanoflann (dependencia nueva de OpenMVS master) ──
+# Es header-only, compila en segundos. Instala el nanoflannConfig.cmake
+# que OpenMVS busca con FIND_PACKAGE(nanoflann REQUIRED).
+RUN git clone https://github.com/jlblancoc/nanoflann.git --branch v1.5.5 /tmp/nanoflann && \
+    mkdir /tmp/nanoflann_build && cd /tmp/nanoflann_build && \
+    cmake . /tmp/nanoflann \
+        -DNANOFLANN_BUILD_EXAMPLES=OFF \
+        -DNANOFLANN_BUILD_TESTS=OFF && \
+    make install && \
+    cd / && rm -rf /tmp/nanoflann_build /tmp/nanoflann
 
 # ── Paso 5: OpenMVS (compilar con CUDA, rama master estable) ──
 RUN git clone https://github.com/cdcseacave/openMVS.git --branch master /tmp/openMVS && \

@@ -16,7 +16,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update -yq && apt-get install -yq \
     build-essential git cmake wget ffmpeg pkg-config \
     colmap xvfb \
-    libpng-dev libjpeg-dev libtiff-dev libjxl-dev \
+    libpng-dev libjpeg-dev libtiff-dev \
     libglu1-mesa-dev libglew-dev libglfw3-dev \
     libboost-iostreams-dev libboost-program-options-dev \
     libboost-system-dev libboost-serialization-dev libboost-thread-dev \
@@ -55,6 +55,7 @@ RUN git clone https://github.com/jlblancoc/nanoflann.git --branch v1.5.5 /tmp/na
 
 # ── Paso 5: OpenMVS (compilar con CUDA, rama master estable) ──
 RUN git clone https://github.com/cdcseacave/openMVS.git --branch master /tmp/openMVS && \
+    sed -i 's/pkg_check_modules(${PREFIX} REQUIRED IMPORTED_TARGET ${MODULE_NAME})/pkg_check_modules(${PREFIX} IMPORTED_TARGET ${MODULE_NAME})/' /tmp/openMVS/libs/IO/CMakeLists.txt && \
     mkdir /tmp/openMVS_build && cd /tmp/openMVS_build && \
     cmake . /tmp/openMVS \
         -DCMAKE_BUILD_TYPE=Release \

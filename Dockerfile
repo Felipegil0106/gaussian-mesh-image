@@ -56,6 +56,7 @@ RUN git clone https://github.com/jlblancoc/nanoflann.git --branch v1.5.5 /tmp/na
 # ── Paso 5: OpenMVS (compilar con CUDA, rama master estable) ──
 RUN git clone https://github.com/cdcseacave/openMVS.git --branch master /tmp/openMVS && \
     sed -i 's/pkg_check_modules(${PREFIX} REQUIRED IMPORTED_TARGET ${MODULE_NAME})/pkg_check_modules(${PREFIX} IMPORTED_TARGET ${MODULE_NAME})/' /tmp/openMVS/libs/IO/CMakeLists.txt && \
+    sed -i 's/cv::IMWRITE_JPEGXL_QUALITY/cv::IMWRITE_JPEG_QUALITY/g' /tmp/openMVS/libs/Common/Types.inl && \
     mkdir /tmp/openMVS_build && cd /tmp/openMVS_build && \
     cmake . /tmp/openMVS \
         -DCMAKE_BUILD_TYPE=Release \

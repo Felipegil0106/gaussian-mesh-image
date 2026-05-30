@@ -51,7 +51,7 @@ RUN git clone https://github.com/cdcseacave/openMVS.git --branch master /tmp/ope
         -DOpenMVS_USE_CUDA=ON \
         -DCMAKE_LIBRARY_PATH=/usr/local/cuda/lib64/stubs/ \
         -DCUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda/ \
-        -DCMAKE_CUDA_ARCHITECTURES=all \
+        -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89" \
         -DEIGEN3_INCLUDE_DIR=/usr/local/include/eigen3 && \
     make -j$(nproc) && \
     make install && \
@@ -66,10 +66,9 @@ RUN pip install --no-cache-dir \
 # Los binarios de OpenMVS quedan en /usr/local/bin/OpenMVS
 ENV PATH=/usr/local/bin/OpenMVS:$PATH
 
-# Verificación: que los ejecutables existan
+# Verificación: que los ejecutables existan (no debe hacer fallar el build)
 RUN echo "=== Verificando OpenMVS ===" && \
     ls -la /usr/local/bin/OpenMVS/ && \
-    (DensifyPointCloud --help > /dev/null 2>&1 || echo "DensifyPointCloud presente") && \
     echo "=== OpenMVS instalado OK ==="
 
 WORKDIR /workspace

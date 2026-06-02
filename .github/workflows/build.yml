@@ -30,25 +30,23 @@ jobs:
       - name: Bajar el código
         uses: actions/checkout@v4
 
-      # ── Paso 3: preparar el constructor de imágenes ──
-      # IMPORTANTE: por defecto buildx baja su motor 'buildkit' desde Docker Hub
-      # (registry-1.docker.io), que da TIMEOUT por límites de descarga. Aquí le
-      # decimos que lo baje desde el espejo de GitHub (ghcr.io), que GitHub
-      # alcanza siempre y no tiene esos límites. Esto arregla el error
-      # "booting buildkit ... context deadline exceeded".
-      - name: Configurar Docker Buildx
-        id: buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver-opts: image=ghcr.io/moby/buildkit:buildx-stable-1
-
-      # ── Paso 4: iniciar sesión en tu Docker Hub ──
-      # Usa los "secrets" que tú vas a configurar en GitHub (ver instrucciones).
+      # ── Paso 3: iniciar sesión en Docker Hub (ANTES de crear el builder) ──
+      # CLAVE: nos logueamos PRIMERO. El error de timeout con Docker Hub venía
+      # del límite de descargas ANÓNIMAS. Estando logueados, Docker Hub da más
+      # cuota y la descarga de buildkit (su motor) ya no se bloquea.
       - name: Iniciar sesión en Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # ── Paso 4: preparar el constructor de imágenes ──
+      # Ya logueados arriba, buildx baja su motor buildkit desde Docker Hub sin
+      # toparse con el límite anónimo. (Quitamos el intento con ghcr.io porque
+      # esa imagen ahí da 'denied' / no es pública.)
+      - name: Configurar Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v3
 
       # ── Paso 5: construir la imagen y subirla ──
       # La imagen base (runpod/pytorch) también viene de Docker Hub, que a veces

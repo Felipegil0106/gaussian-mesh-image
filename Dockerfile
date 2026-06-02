@@ -80,13 +80,20 @@ RUN git clone https://github.com/cdcseacave/openMVS.git --branch master /tmp/ope
 
 # ── Paso 6: librerías Python que el worker necesita ──
 # (para descargar/subir, procesar imágenes y convertir la malla a .glb)
-# open3d = reconstrucción de superficie Poisson (anti-triángulos/facetas).
-#   Es la pieza clave del pipeline nuevo: convierte la malla irregular en una
-#   superficie continua y suave. Instalarlo AQUÍ (en la imagen) evita que el
-#   pod falle intentando instalarlo en cada render (lo que pasaba antes).
+# Estas son ESENCIALES: si fallan, el build debe fallar (las necesitamos sí o sí).
 RUN pip install --no-cache-dir \
     boto3 requests tqdm pillow "numpy<2" \
-    opencv-python-headless trimesh open3d
+    opencv-python-headless trimesh
+
+# ── Paso 6b: open3d (reconstrucción Poisson, anti-triángulos) ──
+# open3d es PESADO y a veces choca al resolver versiones junto con lo de arriba.
+# Por eso va en su PROPIO paso. Y si llegara a fallar, NO rompemos el build
+# (||  echo ...): la imagen se construye igual, y el worker instalará open3d en
+# el pod como respaldo. Así garantizamos que la imagen v2 SIEMPRE se cree.
+# Fijamos una versión estable conocida que funciona con numpy<2 y Python 3.10.
+RUN pip install --no-cache-dir "open3d==0.18.0" \
+    || pip install --no-cache-dir open3d \
+    || echo "AVISO: open3d no se instaló en la imagen; el worker lo instalará en el pod"
 
 # Los binarios de OpenMVS quedan en /usr/local/bin/OpenMVS
 ENV PATH=/usr/local/bin/OpenMVS:$PATH
@@ -134,9 +141,14 @@ RUN mkdir -p /root/.cache/torch/hub/checkpoints && \
     wget -q -O "$REALESRGAN_DIR/RealESRGAN_x4plus.pth" \
       "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth"
 
-# 7f. Verificar que las IAs Y open3d importan correctamente DENTRO de la imagen
-#     (si algo falla, el build falla aquí y nos enteramos antes de usarla).
-RUN python3 -c "import simple_lama_inpainting; from realesrgan import RealESRGANer; from basicsr.archs.rrdbnet_arch import RRDBNet; import scipy, fire; import open3d; print('=== IAs + open3d OK dentro de la imagen (open3d', open3d.__version__, ') ===')"
+# 7f. Verificar que las IAs importan correctamente DENTRO de la imagen
+#     (si las IAs fallan, el build falla aquí y nos enteramos antes de usarla).
+RUN python3 -c "import simple_lama_inpainting; from realesrgan import RealESRGANer; from basicsr.archs.rrdbnet_arch import RRDBNet; import scipy, fire; print('=== IAs OK dentro de la imagen ===')"
+
+# 7g. open3d es OPCIONAL: si quedó instalado, lo confirmamos; si no, solo
+#     avisamos (NO rompemos el build). El worker lo instalará en el pod si falta.
+RUN python3 -c "import open3d; print('=== open3d OK en la imagen:', open3d.__version__, '===')" \
+    || echo "AVISO: open3d NO está en la imagen; el worker intentará instalarlo en el pod"
 
 # Verificación: que los ejecutables existan (no debe hacer fallar el build)
 RUN echo "=== Verificando OpenMVS ===" && \

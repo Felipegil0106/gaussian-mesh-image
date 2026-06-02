@@ -1,11 +1,13 @@
 # ══════════════════════════════════════════════════════════════
-# Imagen Gaussian Scanner — Malla (COLMAP + OpenMVS, todo precompilado)
+# Imagen Gaussian Scanner — Malla v2 (COLMAP + OpenMVS + IAs, todo adentro)
 # ══════════════════════════════════════════════════════════════
-# Base: la MISMA que ya usamos y funciona (torch 2.1.1 + CUDA 12.1 + Ubuntu 22.04).
-# Sobre ella agregamos COLMAP (apt) y OpenMVS (compilado con la receta oficial).
+# Igual que la v1 (COLMAP + OpenMVS precompilados) PERO ahora también trae
+# las IAs de post-proceso (LaMa + Real-ESRGAN) ya instaladas y con sus modelos
+# descargados. Así el worker NO instala nada en cada arranque → cero errores
+# de instalación y renders más rápidos.
 #
-# Construir:  docker build -t TU_USUARIO/gaussian-mesh:v1 .
-# Subir:      docker push TU_USUARIO/gaussian-mesh:v1
+# Construir:  docker build -t TU_USUARIO/gaussian-mesh:v2 .
+# Subir:      docker push TU_USUARIO/gaussian-mesh:v2
 # ══════════════════════════════════════════════════════════════
 FROM runpod/pytorch:2.1.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
@@ -13,6 +15,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # ── Paso 1: sistema base + COLMAP + dependencias de OpenMVS ──
 # (COLMAP de apt = el que ya usamos y sirve para la parte sparse)
+# libgl1/libgomp1/libusb = las necesita open3d para importar en un servidor
+#   sin pantalla (si faltan, open3d falla con 'libGL.so not found').
 RUN apt-get update -yq && apt-get install -yq \
     build-essential git cmake wget ffmpeg pkg-config \
     colmap xvfb \
@@ -23,6 +27,7 @@ RUN apt-get update -yq && apt-get install -yq \
     libopencv-dev \
     libgmp-dev libmpfr-dev zlib1g-dev \
     python3-dev \
+    libgl1 libgomp1 libusb-1.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Paso 2: Eigen 3.4 (versión EXACTA que pide OpenMVS) ──
@@ -75,12 +80,63 @@ RUN git clone https://github.com/cdcseacave/openMVS.git --branch master /tmp/ope
 
 # ── Paso 6: librerías Python que el worker necesita ──
 # (para descargar/subir, procesar imágenes y convertir la malla a .glb)
+# open3d = reconstrucción de superficie Poisson (anti-triángulos/facetas).
+#   Es la pieza clave del pipeline nuevo: convierte la malla irregular en una
+#   superficie continua y suave. Instalarlo AQUÍ (en la imagen) evita que el
+#   pod falle intentando instalarlo en cada render (lo que pasaba antes).
 RUN pip install --no-cache-dir \
     boto3 requests tqdm pillow "numpy<2" \
-    opencv-python-headless trimesh
+    opencv-python-headless trimesh open3d
 
 # Los binarios de OpenMVS quedan en /usr/local/bin/OpenMVS
 ENV PATH=/usr/local/bin/OpenMVS:$PATH
+
+# ══════════════════════════════════════════════════════════════
+# ── Paso 7: IAs de post-proceso (LaMa + Real-ESRGAN) ──
+# Se instalan UNA SOLA VEZ aquí, al construir la imagen, en vez de en cada
+# arranque del pod. Esto elimina de raíz los errores de instalación (red,
+# scipy, etc.) y hace los renders más rápidos.
+# La base ya trae torch 2.1.1 + torchvision + CUDA 12.1, así que NO se toca torch.
+# ══════════════════════════════════════════════════════════════
+
+# 7a. LaMa (relleno natural). --no-deps para que NO intente compilar el Pillow
+#     viejo que pide (usa el torch/pillow/numpy de la base). + fire (su única
+#     dependencia liviana extra).
+RUN pip install --no-cache-dir --no-deps simple-lama-inpainting && \
+    pip install --no-cache-dir fire
+
+# 7b. Real-ESRGAN (nitidez) + basicsr, --no-deps para no tocar torch.
+RUN pip install --no-cache-dir --no-deps basicsr realesrgan
+
+# 7c. Dependencias livianas que basicsr/realesrgan necesitan (sin torch).
+#     Todas de una vez para que no falte ninguna en tiempo de ejecución.
+RUN pip install --no-cache-dir --no-deps \
+    addict future lmdb pyyaml yapf scipy tqdm requests \
+    tensorboard einops opencv-python gfpgan facexlib
+
+# 7d. Parche permanente del bug de basicsr con torchvision nuevo:
+#     basicsr importa 'torchvision.transforms.functional_tensor' (ya removido).
+#     Creamos un shim físico en el paquete para que el import siempre funcione,
+#     sin depender de un parche en tiempo de ejecución.
+RUN python3 -c "import torchvision.transforms.functional as F, os, torchvision; \
+p=os.path.join(os.path.dirname(torchvision.__file__),'transforms','functional_tensor.py'); \
+open(p,'w').write('from torchvision.transforms.functional import rgb_to_grayscale\n'); \
+print('shim functional_tensor creado en',p)"
+
+# 7e. Pre-descargar los modelos de IA para que NO se bajen en cada arranque.
+#     LaMa: big-lama.pt → ~/.cache/torch/hub/checkpoints/
+#     Real-ESRGAN: RealESRGAN_x4plus.pth → carpeta 'weights' del paquete
+RUN mkdir -p /root/.cache/torch/hub/checkpoints && \
+    wget -q -O /root/.cache/torch/hub/checkpoints/big-lama.pt \
+      "https://github.com/enesmsahin/simple-lama-inpainting/releases/download/v0.1.0/big-lama.pt" && \
+    python3 -c "import os,realesrgan; d=os.path.join(os.path.dirname(realesrgan.__file__),'weights'); os.makedirs(d,exist_ok=True); print('weights dir:',d)" && \
+    REALESRGAN_DIR=$(python3 -c "import os,realesrgan; print(os.path.join(os.path.dirname(realesrgan.__file__),'weights'))") && \
+    wget -q -O "$REALESRGAN_DIR/RealESRGAN_x4plus.pth" \
+      "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth"
+
+# 7f. Verificar que las IAs Y open3d importan correctamente DENTRO de la imagen
+#     (si algo falla, el build falla aquí y nos enteramos antes de usarla).
+RUN python3 -c "import simple_lama_inpainting; from realesrgan import RealESRGANer; from basicsr.archs.rrdbnet_arch import RRDBNet; import scipy, fire; import open3d; print('=== IAs + open3d OK dentro de la imagen (open3d', open3d.__version__, ') ===')"
 
 # Verificación: que los ejecutables existan (no debe hacer fallar el build)
 RUN echo "=== Verificando OpenMVS ===" && \

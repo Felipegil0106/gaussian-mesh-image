@@ -49,4 +49,4 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/gaussian-mesh:v1
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/gaussian-mesh:v2

@@ -86,14 +86,15 @@ RUN pip install --no-cache-dir \
     opencv-python-headless trimesh
 
 # ── Paso 6b: open3d (reconstrucción Poisson, anti-triángulos) ── OBLIGATORIO ──
-# CAUSA del fallo anterior: pedí open3d 0.18.0, pero esa versión usa una etiqueta
-# de wheel antigua (manylinux_2_27) que el pip de la imagen no resolvía bien →
-# "Could not find a version". SOLUCIÓN: (1) actualizar pip primero, para que
-# reconozca todos los formatos de wheel modernos; (2) usar open3d 0.19.0, que es
-# la versión disponible con wheel para python 3.10 + ubuntu 22 (manylinux_2_31).
-# Sigue siendo OBLIGATORIO: si falla, el build falla y vemos el error en el log.
+# CAUSA REAL del fallo anterior (confirmada reproduciéndola): NO era la versión,
+# era FALTA DE ESPACIO en disco ("No space left on device"). open3d + sus
+# dependencias pesan ~1.7GB. SOLUCIÓN: (1) liberamos mucho más disco en el
+# runner (ver build.yml); (2) aquí instalamos pip al día + open3d y limpiamos
+# la caché de pip en el MISMO paso para no dejar basura ocupando espacio.
+# Sigue OBLIGATORIO: si falla, el build falla y vemos el error en el log.
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -v "open3d==0.19.0" && \
+    pip install --no-cache-dir "open3d==0.19.0" && \
+    rm -rf /root/.cache/pip /tmp/* && \
     python3 -c "import open3d; print('open3d', open3d.__version__, 'instalado OK')"
 
 # Los binarios de OpenMVS quedan en /usr/local/bin/OpenMVS

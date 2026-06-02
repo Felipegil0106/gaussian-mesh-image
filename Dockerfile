@@ -86,14 +86,14 @@ RUN pip install --no-cache-dir \
     opencv-python-headless trimesh
 
 # ── Paso 6b: open3d (reconstrucción Poisson, anti-triángulos) ── OBLIGATORIO ──
-# IMPORTANTE: antes esto era opcional (con ||), así que cuando open3d fallaba,
-# la imagen se creaba IGUAL sin él, en silencio (build verde pero sin open3d).
-# Resultado: Poisson nunca corría. Ahora open3d es OBLIGATORIO: si falla, el
-# build FALLA y veremos el error EXACTO en el log de GitHub Actions (en vez de
-# una imagen muda). open3d 0.18.0 tiene wheel para python 3.10 (verificado),
-# así que debería instalar bien. Va DESPUÉS de numpy<2 (paso 6) para que no
-# arrastre un numpy nuevo incompatible. -v para que el log muestre el detalle.
-RUN pip install --no-cache-dir -v "open3d==0.18.0" && \
+# CAUSA del fallo anterior: pedí open3d 0.18.0, pero esa versión usa una etiqueta
+# de wheel antigua (manylinux_2_27) que el pip de la imagen no resolvía bien →
+# "Could not find a version". SOLUCIÓN: (1) actualizar pip primero, para que
+# reconozca todos los formatos de wheel modernos; (2) usar open3d 0.19.0, que es
+# la versión disponible con wheel para python 3.10 + ubuntu 22 (manylinux_2_31).
+# Sigue siendo OBLIGATORIO: si falla, el build falla y vemos el error en el log.
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -v "open3d==0.19.0" && \
     python3 -c "import open3d; print('open3d', open3d.__version__, 'instalado OK')"
 
 # Los binarios de OpenMVS quedan en /usr/local/bin/OpenMVS

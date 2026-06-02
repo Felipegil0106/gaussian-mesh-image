@@ -86,16 +86,17 @@ RUN pip install --no-cache-dir \
     opencv-python-headless trimesh
 
 # ── Paso 6b: open3d (reconstrucción Poisson, anti-triángulos) ── OBLIGATORIO ──
-# CAUSA REAL del fallo anterior (confirmada reproduciéndola): NO era la versión,
-# era FALTA DE ESPACIO en disco ("No space left on device"). open3d + sus
-# dependencias pesan ~1.7GB. SOLUCIÓN: (1) liberamos mucho más disco en el
-# runner (ver build.yml); (2) aquí instalamos pip al día + open3d y limpiamos
-# la caché de pip en el MISMO paso para no dejar basura ocupando espacio.
+# CAUSA EXACTA del fallo (vista en el log): open3d arrastra 'dash', que pide una
+# versión nueva de 'blinker'. La imagen base trae blinker 1.4 instalado con un
+# método antiguo (distutils) que pip NO puede desinstalar → "Cannot uninstall
+# blinker 1.4" → exit 1. SOLUCIÓN: --ignore-installed blinker, para que pip NO
+# intente borrar el viejo, solo instale el nuevo encima (no toca el del sistema).
 # Sigue OBLIGATORIO: si falla, el build falla y vemos el error en el log.
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir "open3d==0.19.0" && \
+RUN echo "=== ESPACIO ANTES ===" && df -h / && \
+    pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir --ignore-installed blinker "open3d==0.19.0" "numpy<2" && \
     rm -rf /root/.cache/pip /tmp/* && \
-    python3 -c "import open3d; print('open3d', open3d.__version__, 'instalado OK')"
+    python3 -c "import open3d, numpy; print('open3d', open3d.__version__, '+ numpy', numpy.__version__, 'OK')"
 
 # Los binarios de OpenMVS quedan en /usr/local/bin/OpenMVS
 ENV PATH=/usr/local/bin/OpenMVS:$PATH

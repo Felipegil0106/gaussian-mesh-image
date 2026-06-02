@@ -11,17 +11,28 @@ jobs:
     steps:
       # ── Paso 1: liberar espacio en el runner de GitHub ──
       # La imagen pytorch+cuda + compilar OpenMVS necesita mucho disco.
-      # El runner trae ~14GB libres; esto sube a ~40GB borrando cosas
-      # preinstaladas que no usamos (Android SDK, .NET, etc).
-      - name: Liberar espacio en disco
+      # El runner trae ~14GB libres; esto sube a ~50GB+ borrando cosas
+      # preinstaladas que NO usamos. CAUSA del fallo de open3d: el disco se
+      # llenaba (open3d + deps pesa ~1.7GB y la base pytorch ~20GB). Liberamos
+      # agresivamente ANTES del build para que open3d quepa con holgura.
+      - name: Liberar espacio en disco (agresivo)
         run: |
           echo "Espacio antes:"
           df -h /
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo rm -rf /usr/local/share/boost
+          # Borrar SDKs y herramientas grandes que no usamos para nada
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+          sudo rm -rf /usr/local/share/boost || true
+          sudo rm -rf /usr/local/share/powershell || true
+          sudo rm -rf /usr/share/swift || true
+          sudo rm -rf /usr/local/.ghcup || true
+          sudo rm -rf /opt/microsoft || true
+          sudo rm -rf /usr/lib/google-cloud-sdk || true
+          sudo rm -rf /usr/local/lib/node_modules || true
+          # Limpiar cachés de apt y docker
+          sudo apt-get clean || true
           sudo docker image prune --all --force || true
           echo "Espacio después:"
           df -h /

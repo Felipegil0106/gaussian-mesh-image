@@ -31,8 +31,16 @@ jobs:
         uses: actions/checkout@v4
 
       # ── Paso 3: preparar el constructor de imágenes ──
+      # IMPORTANTE: por defecto buildx baja su motor 'buildkit' desde Docker Hub
+      # (registry-1.docker.io), que da TIMEOUT por límites de descarga. Aquí le
+      # decimos que lo baje desde el espejo de GitHub (ghcr.io), que GitHub
+      # alcanza siempre y no tiene esos límites. Esto arregla el error
+      # "booting buildkit ... context deadline exceeded".
       - name: Configurar Docker Buildx
+        id: buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: image=ghcr.io/moby/buildkit:buildx-stable-1
 
       # ── Paso 4: iniciar sesión en tu Docker Hub ──
       # Usa los "secrets" que tú vas a configurar en GitHub (ver instrucciones).
@@ -43,10 +51,19 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # ── Paso 5: construir la imagen y subirla ──
-      - name: Construir y subir la imagen
-        uses: docker/build-push-action@v6
+      # La imagen base (runpod/pytorch) también viene de Docker Hub, que a veces
+      # falla. Añadimos reintentos: si el build falla por un timeout de red,
+      # vuelve a intentarlo automáticamente hasta 3 veces antes de rendirse.
+      - name: Construir y subir la imagen (con reintentos)
+        uses: nick-fields/retry@v3
         with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/gaussian-mesh:v2
+          timeout_minutes: 90
+          max_attempts: 3
+          retry_wait_seconds: 60
+          command: |
+            docker buildx build \
+              --builder ${{ steps.buildx.outputs.name }} \
+              --file ./Dockerfile \
+              --tag ${{ secrets.DOCKERHUB_USERNAME }}/gaussian-mesh:v2 \
+              --push \
+              .

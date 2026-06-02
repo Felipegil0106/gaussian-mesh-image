@@ -85,15 +85,16 @@ RUN pip install --no-cache-dir \
     boto3 requests tqdm pillow "numpy<2" \
     opencv-python-headless trimesh
 
-# ── Paso 6b: open3d (reconstrucción Poisson, anti-triángulos) ──
-# open3d es PESADO y a veces choca al resolver versiones junto con lo de arriba.
-# Por eso va en su PROPIO paso. Y si llegara a fallar, NO rompemos el build
-# (||  echo ...): la imagen se construye igual, y el worker instalará open3d en
-# el pod como respaldo. Así garantizamos que la imagen v2 SIEMPRE se cree.
-# Fijamos una versión estable conocida que funciona con numpy<2 y Python 3.10.
-RUN pip install --no-cache-dir "open3d==0.18.0" \
-    || pip install --no-cache-dir open3d \
-    || echo "AVISO: open3d no se instaló en la imagen; el worker lo instalará en el pod"
+# ── Paso 6b: open3d (reconstrucción Poisson, anti-triángulos) ── OBLIGATORIO ──
+# IMPORTANTE: antes esto era opcional (con ||), así que cuando open3d fallaba,
+# la imagen se creaba IGUAL sin él, en silencio (build verde pero sin open3d).
+# Resultado: Poisson nunca corría. Ahora open3d es OBLIGATORIO: si falla, el
+# build FALLA y veremos el error EXACTO en el log de GitHub Actions (en vez de
+# una imagen muda). open3d 0.18.0 tiene wheel para python 3.10 (verificado),
+# así que debería instalar bien. Va DESPUÉS de numpy<2 (paso 6) para que no
+# arrastre un numpy nuevo incompatible. -v para que el log muestre el detalle.
+RUN pip install --no-cache-dir -v "open3d==0.18.0" && \
+    python3 -c "import open3d; print('open3d', open3d.__version__, 'instalado OK')"
 
 # Los binarios de OpenMVS quedan en /usr/local/bin/OpenMVS
 ENV PATH=/usr/local/bin/OpenMVS:$PATH
@@ -145,10 +146,9 @@ RUN mkdir -p /root/.cache/torch/hub/checkpoints && \
 #     (si las IAs fallan, el build falla aquí y nos enteramos antes de usarla).
 RUN python3 -c "import simple_lama_inpainting; from realesrgan import RealESRGANer; from basicsr.archs.rrdbnet_arch import RRDBNet; import scipy, fire; print('=== IAs OK dentro de la imagen ===')"
 
-# 7g. open3d es OPCIONAL: si quedó instalado, lo confirmamos; si no, solo
-#     avisamos (NO rompemos el build). El worker lo instalará en el pod si falta.
-RUN python3 -c "import open3d; print('=== open3d OK en la imagen:', open3d.__version__, '===')" \
-    || echo "AVISO: open3d NO está en la imagen; el worker intentará instalarlo en el pod"
+# 7g. Verificar open3d (OBLIGATORIO): si no importa aquí, el build falla y nos
+#     enteramos en el log, en vez de descubrirlo en el pod como hasta ahora.
+RUN python3 -c "import open3d; print('=== open3d OK en la imagen:', open3d.__version__, '===')"
 
 # Verificación: que los ejecutables existan (no debe hacer fallar el build)
 RUN echo "=== Verificando OpenMVS ===" && \

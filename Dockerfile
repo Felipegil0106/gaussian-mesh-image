@@ -32,18 +32,22 @@ RUN apt-get update -yq && apt-get install -yq \
 # ── Paso 2: compilar MVS-Texturing (nmoehrle/mvs-texturing) ──
 # Su CMake descarga y compila sus propias sub-librerías (mve, rayint, mapmap)
 # dentro de /elibs automáticamente. El binario principal es 'texrecon'.
-# Lo dejamos en /usr/local/bin/texrecon (en el PATH).
-RUN git clone https://github.com/nmoehrle/mvs-texturing.git /opt/mvs-texturing && \
-    mkdir /opt/mvs-texturing/build && cd /opt/mvs-texturing/build && \
-    cmake -DCMAKE_BUILD_TYPE=Release .. && \
-    make -j$(nproc) && \
-    find /opt/mvs-texturing/build -name texrecon -type f -exec cp {} /usr/local/bin/texrecon \; && \
+#
+# FIX: borramos /opt/mvs-texturing ANTES de clonar. Si un build anterior quedó
+# a medias, la carpeta existe y 'git clone' se niega (error 'already exists').
+# Con rm -rf siempre partimos de cero. Compilamos SOLO texrecon (más rápido).
+RUN rm -rf /opt/mvs-texturing && \
+    git clone https://github.com/nmoehrle/mvs-texturing.git /opt/mvs-texturing && \
+    mkdir -p /opt/mvs-texturing/build && cd /opt/mvs-texturing/build && \
+    cmake -DCMAKE_BUILD_TYPE=Release -DRESEARCH=OFF .. && \
+    make -j"$(nproc)" texrecon && \
+    cp "$(find /opt/mvs-texturing/build -name texrecon -type f | head -1)" /usr/local/bin/texrecon && \
     chmod +x /usr/local/bin/texrecon && \
     echo "=== texrecon compilado ===" && ls -la /usr/local/bin/texrecon
 
 # ── Paso 3: verificar que texrecon corre (si no, el build falla aquí) ──
 # texrecon sin argumentos imprime su ayuda y sale con código !=0; por eso
-# usamos '|| true' y comprobamos que el binario responde.
+# usamos '|| true' y comprobamos que el binario existe y es ejecutable.
 RUN echo "=== Verificando texrecon ===" && \
     (/usr/local/bin/texrecon 2>&1 | head -5 || true) && \
     test -x /usr/local/bin/texrecon && \

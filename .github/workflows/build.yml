@@ -1,7 +1,6 @@
-name: Construir imagen Gaussian Mesh
+name: Construir imagen Render-GS (2DGS)
 
-# Se ejecuta cuando tú aprietes el botón "Run workflow" en GitHub
-# (manual, para que no se construya solo cada vez que subes algo)
+# Manual: solo se construye cuando aprietas "Run workflow" en GitHub.
 on:
   workflow_dispatch:
 
@@ -9,17 +8,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # ── Paso 1: liberar espacio en el runner de GitHub ──
-      # La imagen pytorch+cuda + compilar OpenMVS necesita mucho disco.
-      # El runner trae ~14GB libres; esto sube a ~50GB+ borrando cosas
-      # preinstaladas que NO usamos. CAUSA del fallo de open3d: el disco se
-      # llenaba (open3d + deps pesa ~1.7GB y la base pytorch ~20GB). Liberamos
-      # agresivamente ANTES del build para que open3d quepa con holgura.
       - name: Liberar espacio en disco (agresivo)
         run: |
-          echo "Espacio antes:"
-          df -h /
-          # Borrar SDKs y herramientas grandes que no usamos para nada
+          echo "Espacio antes:"; df -h /
           sudo rm -rf /usr/share/dotnet || true
           sudo rm -rf /usr/local/lib/android || true
           sudo rm -rf /opt/ghc || true
@@ -31,48 +22,33 @@ jobs:
           sudo rm -rf /opt/microsoft || true
           sudo rm -rf /usr/lib/google-cloud-sdk || true
           sudo rm -rf /usr/local/lib/node_modules || true
-          # Limpiar cachés de apt y docker
           sudo apt-get clean || true
           sudo docker image prune --all --force || true
-          echo "Espacio después:"
-          df -h /
+          echo "Espacio después:"; df -h /
 
-      # ── Paso 2: descargar tu repositorio (con el Dockerfile) ──
       - name: Bajar el código
         uses: actions/checkout@v4
 
-      # ── Paso 3: iniciar sesión en Docker Hub (ANTES de crear el builder) ──
-      # CLAVE: nos logueamos PRIMERO. El error de timeout con Docker Hub venía
-      # del límite de descargas ANÓNIMAS. Estando logueados, Docker Hub da más
-      # cuota y la descarga de buildkit (su motor) ya no se bloquea.
       - name: Iniciar sesión en Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # ── Paso 4: preparar el constructor de imágenes ──
-      # Ya logueados arriba, buildx baja su motor buildkit desde Docker Hub sin
-      # toparse con el límite anónimo. (Quitamos el intento con ghcr.io porque
-      # esa imagen ahí da 'denied' / no es pública.)
       - name: Configurar Docker Buildx
         id: buildx
         uses: docker/setup-buildx-action@v3
 
-      # ── Paso 5: construir la imagen y subirla ──
-      # La imagen base (runpod/pytorch) también viene de Docker Hub, que a veces
-      # falla. Añadimos reintentos: si el build falla por un timeout de red,
-      # vuelve a intentarlo automáticamente hasta 3 veces antes de rendirse.
       - name: Construir y subir la imagen (con reintentos)
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: 90
+          timeout_minutes: 120
           max_attempts: 3
           retry_wait_seconds: 60
           command: |
             docker buildx build \
               --builder ${{ steps.buildx.outputs.name }} \
               --file ./Dockerfile \
-              --tag ${{ secrets.DOCKERHUB_USERNAME }}/gaussian-mesh:v2 \
+              --tag ${{ secrets.DOCKERHUB_USERNAME }}/gaussian-mesh:v3 \
               --push \
               .

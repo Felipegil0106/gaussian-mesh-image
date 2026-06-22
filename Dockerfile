@@ -150,6 +150,15 @@ RUN cd /tmp && git clone --depth 1 https://github.com/cgal/cgal --branch v6.0.1 
     cmake ../cgal >/dev/null 2>&1 && make >/dev/null 2>&1 && make install >/dev/null 2>&1 && \
     cd /tmp && rm -rf cgal_build cgal
 
+# nanoflann (solo cabeceras) — OpenMVS lo requiere (FIND_PACKAGE nanoflann REQUIRED).
+# Esta era la pieza que faltaba: el build llegaba al paso de OpenMVS y fallaba aquí.
+# Lo instalamos desde fuente para garantizar que quede el nanoflannConfig.cmake.
+RUN cd /tmp && git clone --depth 1 https://github.com/jlblancoc/nanoflann.git && \
+    mkdir nanoflann_build && cd nanoflann_build && \
+    cmake ../nanoflann -DNANOFLANN_BUILD_EXAMPLES=OFF -DNANOFLANN_BUILD_TESTS=OFF >/dev/null 2>&1 && \
+    make install >/dev/null 2>&1 && \
+    cd /tmp && rm -rf nanoflann_build nanoflann
+
 # VCGLib (cabeceras) + OpenMVS (rama master estable, SIN CUDA)
 RUN cd /opt && git clone --depth 1 https://github.com/cdcseacave/VCG.git vcglib && \
     git clone --depth 1 https://github.com/cdcseacave/openMVS.git --branch master && \

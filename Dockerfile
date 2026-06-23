@@ -160,13 +160,16 @@ RUN cd /tmp && git clone --depth 1 https://github.com/jlblancoc/nanoflann.git &&
     cd /tmp && rm -rf nanoflann_build nanoflann
 
 # VCGLib (cabeceras) + OpenMVS (rama master estable, SIN CUDA)
-# PARCHE: OpenMVS marca libjxl (JPEG XL) como REQUIRED por un bug en su CMake,
-# pero libjxl NO existe en apt de Ubuntu 22.04 y NO lo necesitamos (las fotos son
-# JPG/PNG). Quitamos el REQUIRED del pkg_check_modules para que sea opcional; el
-# propio código de OpenMVS ya contempla compilar sin JPEG XL.
+# DOS PARCHES a bugs de OpenMVS master con OpenCV 4.5.4 (la de Ubuntu 22.04):
+#  1) libjxl marcado REQUIRED en su CMake aunque no lo necesitamos (fotos JPG/PNG):
+#     quitamos el REQUIRED del pkg_check_modules → JPEG XL queda opcional.
+#  2) Types.inl usa cv::IMWRITE_JPEGXL_QUALITY (solo existe en OpenCV 4.7+) dentro
+#     de un bloque .jxl que NUNCA usamos. Lo cambiamos por cv::IMWRITE_JPEG_QUALITY
+#     (que sí existe en 4.5.4) → compila; ese bloque es código muerto para nosotros.
 RUN cd /opt && git clone --depth 1 https://github.com/cdcseacave/VCG.git vcglib && \
     git clone --depth 1 https://github.com/cdcseacave/openMVS.git --branch master && \
     sed -i 's/ REQUIRED IMPORTED_TARGET/ IMPORTED_TARGET/' openMVS/libs/IO/CMakeLists.txt && \
+    sed -i 's/cv::IMWRITE_JPEGXL_QUALITY/cv::IMWRITE_JPEG_QUALITY/' openMVS/libs/Common/Types.inl && \
     mkdir openMVS_build && cd openMVS_build && \
     cmake ../openMVS -DCMAKE_BUILD_TYPE=Release -DVCG_ROOT=/opt/vcglib -DOpenMVS_USE_CUDA=OFF && \
     make -j"$(nproc)" && make install && \

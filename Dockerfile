@@ -1,7 +1,18 @@
 # ════════════════════════════════════════════════════════════════════════
-# Contenedor gaussian-mesh:v3 — MASt3R (poses) + 2DGS (malla) + OpenMVS (textura)
+# Contenedor gaussian-mesh:v4.1 — MASt3R + 2DGS + OpenMVS + BLOQUE B
+# FIX v4.1: numpy queda en 1.26.4 en TODA la imagen (v4 lo bajaba a 1.24.4
+# y rompía faiss, que exige >=1.25; scipy exige <1.27 → 1.26.4 es el punto
+# exacto, y es el que la v3 usa en producción). faiss y asmk quedan pineados.
+#   (priors monoculares de profundidad/normales + bundle adjustment de poses)
 # ════════════════════════════════════════════════════════════════════════
-# CAMBIO MAYOR vs v3: las poses de cámara ya NO se calculan con COLMAP+SIFT
+# NUEVO EN v4 (Bloque B):
+#   · pycolmap 4.1.0  → PASO 2b del worker: pulir poses MASt3R (nitidez textura)
+#   · Depth Anything V2 metric-indoor vitb (~390MB, horneado) → prior profundidad
+#   · DSINE ddedde1 (~291MB, horneado; opcional) → prior de normales
+#   · repos de ambos modelos PINEADOS por SHA + xatlas/geffnet horneados
+#   · 2DGS pineado al commit validado (el parche de priors depende de sus anclas)
+# Todo lo de v3 queda IGUAL (mismas capas, mismo orden → caché aprovechable).
+# CAMBIO MAYOR vs v2: las poses de cámara ya NO se calculan con COLMAP+SIFT
 # (que fallaba en paredes blancas: solo 55/127 fotos, cuarto "fantasma" doble).
 # Ahora las calcula MASt3R, un modelo de IA feed-forward que entiende la
 # geometría de cada foto SIN depender de detectar "features" → registra casi
@@ -41,7 +52,7 @@ RUN pip install --no-cache-dir setuptools==69.5.1 wheel==0.43.0 ninja==1.11.1
 
 # ── Paso 3: dependencias Python de 2DGS ──
 RUN pip install --no-cache-dir \
-        numpy==1.24.4 \
+        numpy==1.26.4 \
         plyfile==0.8.1 \
         tqdm==4.66.1 \
         opencv-python-headless==4.8.1.78 \
@@ -55,7 +66,9 @@ RUN pip install --no-cache-dir \
 
 # ── Paso 4: clonar 2DGS (repo oficial hbb1/2d-gaussian-splatting) ──
 WORKDIR /opt
-RUN git clone https://github.com/hbb1/2d-gaussian-splatting.git --recursive 2dgs
+RUN git clone --recursive https://github.com/hbb1/2d-gaussian-splatting.git 2dgs && \
+    cd 2dgs && git checkout 335ad612f2e783a4e57b9cbc4d1e167bd599fc98 && \
+    git submodule update --init --recursive
 WORKDIR /opt/2dgs
 
 # ── Paso 5: compilar submódulos CUDA de 2DGS (--no-build-isolation: usan el
@@ -83,7 +96,7 @@ WORKDIR /opt/mast3r
 # torch de CUDA 11.8, y un torch 13.0 las invalida.) Por eso también quitamos el
 # extra [torch] de huggingface-hub. El assert final aborta el build (gratis) si
 # algo cambió torch.
-RUN printf 'torch==2.0.1\ntorchvision==0.15.2\n' > /opt/torch-constraints.txt && \
+RUN printf 'torch==2.0.1\ntorchvision==0.15.2\nnumpy==1.26.4\n' > /opt/torch-constraints.txt && \
     pip install --no-cache-dir -c /opt/torch-constraints.txt \
         roma \
         einops \
@@ -94,7 +107,7 @@ RUN printf 'torch==2.0.1\ntorchvision==0.15.2\n' > /opt/torch-constraints.txt &&
         "pyglet<2" \
         tensorboard \
         cython \
-        faiss-cpu && \
+        faiss-cpu==1.14.3 && \
     python -c "import torch; assert torch.version.cuda=='11.8', 'torch fue cambiado a CUDA '+str(torch.version.cuda); print('OK: torch sigue en 2.0.1 / CUDA 11.8')"
 
 # Compilar la extensión CUDA 'curope' (acelera el cálculo de posiciones RoPE
@@ -105,6 +118,7 @@ RUN cd /opt/mast3r/dust3r/croco/models/curope && \
 
 # asmk (Aggregated Selective Match Kernels) para el retrieval por imagen.
 RUN git clone https://github.com/jenicek/asmk.git /opt/asmk && \
+    cd /opt/asmk && git checkout 2a96d9c03a841dffdfddabc699a20512dcd09363 && \
     cd /opt/asmk/cython && cythonize *.pyx && \
     cd /opt/asmk && pip install --no-cache-dir -c /opt/torch-constraints.txt -e .
 
@@ -187,6 +201,60 @@ RUN python -c "import torch; assert torch.version.cuda=='11.8', torch.version.cu
     test -x /usr/local/bin/OpenMVS/InterfaceCOLMAP && echo "OpenMVS InterfaceCOLMAP OK" && \
     test -x /usr/local/bin/OpenMVS/TextureMesh && echo "OpenMVS TextureMesh OK" && \
     echo "=== imagen MASt3R+2DGS+OpenMVS lista ==="
+
+
+# ── Paso 8: BLOQUE B — priors monoculares + refinamiento de poses (v4) ──
+# (a) pycolmap: bundle adjustment clásico para PULIR las poses de MASt3R
+#     (quita el temblor de ~0.1° que emborrona la textura al promediar vistas).
+# (b) Depth Anything V2 (métrico, interiores) + DSINE: por cada foto estiman
+#     profundidad en metros y la orientación de cada pixel. El worker se los
+#     pasa al entrenamiento de 2DGS para CERRAR huecos y dejar el techo y las
+#     paredes lisas continuos (donde las fotos solas no anclan geometría).
+# (c) xatlas (antes se instalaba en cada render; ahora queda horneado) y
+#     geffnet (backbone de DSINE).
+# El archivo de constraints CLAVA torch/torchvision/numpy para que NADA de
+# esto actualice PyTorch (lección aprendida del primer build: un torch de
+# CUDA 13 invalida las extensiones CUDA compiladas). El assert aborta gratis.
+RUN printf 'torch==2.0.1\ntorchvision==0.15.2\nnumpy==1.26.4\n' > /opt/pip-constraints-v4.txt && \
+    pip install --no-cache-dir -c /opt/pip-constraints-v4.txt \
+        pycolmap==4.1.0 xatlas==0.0.11 geffnet==1.0.2 && \
+    python -c "import torch, numpy; assert torch.version.cuda=='11.8', torch.version.cuda; assert numpy.__version__=='1.26.4', numpy.__version__; print('OK: torch y numpy intactos')"
+
+# Código de los DOS modelos, PINEADO por SHA a los commits validados en local.
+# (El repo de DSINE YA se movió de commit — fetch por SHA trae EXACTAMENTE lo
+# probado, con historia mínima, aunque el proyecto siga cambiando.)
+RUN mkdir -p /opt/depth_anything_v2 && cd /opt/depth_anything_v2 && \
+    git init -q && git remote add origin https://github.com/DepthAnything/Depth-Anything-V2.git && \
+    git fetch -q --depth 1 origin a561b849ebae10a6f5ef49e26c83cbbcd36c71bf && \
+    git checkout -q FETCH_HEAD && rm -rf .git assets
+
+RUN mkdir -p /opt/dsine && cd /opt/dsine && \
+    git init -q && git remote add origin https://github.com/baegwangbin/DSINE.git && \
+    git fetch -q --depth 1 origin ddedde139279ca3a334dbc377a66993ef76fa7dd && \
+    git checkout -q FETCH_HEAD && rm -rf .git assets docs paper.pdf
+
+# Checkpoints HORNEADOS (igual que los de MASt3R): se bajan UNA vez aquí,
+# gratis en GitHub Actions, y quedan dentro de la imagen.
+#  - profundidad (vitb métrico interiores, ~390MB): OBLIGATORIO → si no baja,
+#    el build FALLA aquí (mejor enterarse gratis en Actions que en la GPU).
+#  - normales DSINE (~291MB): OPCIONAL → si no baja, el worker usa el fallback
+#    "normales desde profundidad" y lo avisa en el log del render.
+RUN mkdir -p /opt/models && cd /opt/models && \
+    wget -q --tries=3 https://huggingface.co/depth-anything/Depth-Anything-V2-Metric-Hypersim-Base/resolve/main/depth_anything_v2_metric_hypersim_vitb.pth && \
+    test -f depth_anything_v2_metric_hypersim_vitb.pth && \
+    (wget -q --tries=3 https://huggingface.co/camenduru/DSINE/resolve/main/dsine.pt || \
+     echo "AVISO: dsine.pt no bajo; el worker usara normales-desde-profundidad") && \
+    ls -lh /opt/models/
+
+# ── Paso 9: verificación v4 (imports ligeros, SIN instanciar modelos) ──
+# DSINE: sys.path con /opt/dsine PRIMERO para que sus paquetes models/ y utils/
+# ganen a los de 2DGS/MASt3R del PYTHONPATH (misma técnica que usa el worker).
+RUN python -c "import numpy; assert numpy.__version__=='1.26.4', numpy.__version__; import faiss; import cv2; import open3d; import torch; assert torch.version.cuda=='11.8'; print('re-chequeo post-instalaciones: numpy', numpy.__version__, '+ faiss + cv2 + open3d + torch OK')" && \
+    python -c "import pycolmap; print('pycolmap', pycolmap.__version__); import xatlas; print('xatlas OK'); import geffnet; print('geffnet OK')" && \
+    python -c "import sys; sys.path.insert(0,'/opt/depth_anything_v2/metric_depth'); from depth_anything_v2.dpt import DepthAnythingV2; print('DAv2 import OK')" && \
+    python -c "import sys; sys.path.insert(0,'/opt/dsine'); import geffnet; _o=geffnet.create_model; geffnet.create_model=lambda *a,**k:_o(*a,**{**k,'pretrained':False}); from models.dsine import DSINE; import utils.utils as du; assert hasattr(du,'pad_input'); print('DSINE import OK')" && \
+    test -f /opt/models/depth_anything_v2_metric_hypersim_vitb.pth && echo "checkpoint profundidad OK" && \
+    echo "=== VERIFICACION_V4_OK ==="
 
 WORKDIR /workspace
 CMD ["/bin/bash"]
